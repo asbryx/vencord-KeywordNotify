@@ -1,0 +1,33 @@
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+
+# Local runtime data
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.tmp
+*.mp3
+*.wav
+*.ogg
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

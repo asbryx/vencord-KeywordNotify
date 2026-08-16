@@ -6,79 +6,64 @@
 
 import "./style.css";
 
-import definePlugin, { OptionType } from "@utils/types";
-import { Button, ChannelStore, Forms, Select, Switch, SelectedChannelStore, TabBar, TextInput, UserStore, UserUtils, useState } from "@webpack/common";
-import { classNameFactory } from "@api/Styles";
 import { DataStore } from "@api/index";
 import { definePluginSettings } from "@api/Settings";
+import { Button } from "@components/Button";
 import { DeleteIcon } from "@components/Icons";
-import { Devs } from "@utils/constants";
-import { findByCodeLazy, findByPropsLazy } from "@webpack";
+import { Divider } from "@components/Divider";
 import { Flex } from "@components/Flex";
+import { FormSwitch } from "@components/FormSwitch";
+import { Heading } from "@components/Heading";
+import { Logger } from "@utils/Logger";
 import { Margins } from "@utils/margins";
-import { Message, User } from "discord-types/general/index.js";
 import { useForceUpdater } from "@utils/react";
+import definePlugin, { OptionType } from "@utils/types";
+import type { Message } from "@vencord/discord-types";
+import { findByPropsLazy } from "@webpack";
+import { ChannelStore, GuildMemberStore, GuildRoleStore, GuildStore, Select, TextInput, UserStore, useEffect, useState } from "@webpack/common";
 
-type KeywordEntry = { regex: string, listIds: Array<string>, listType: ListType, ignoreCase: boolean };
+import { clearCustomAudio, loadCustomAudio, reconcileAudioFileName, replaceMentionNotificationSound, selectCustomAudio, stopCustomAudio, type CustomAudioKind } from "./audio";
+import type { NotificationMentions } from "./content";
+import { KeywordHistoryButton } from "./history";
+import { findKeywordMatch, getMessageText, KeywordEntry, ListType } from "./matcher";
+import { selectNotificationImage, selectNotificationImageUpdate, selectXPreviewImage, selectXPreviewImageUpdate } from "./media";
+import { isSpecificMention, resolveUserMentionNames } from "./mentions";
+import { deliverKeywordNotification, enrichKeywordNotificationImage, startKeywordNotificationManager, stopKeywordNotificationManager } from "./notificationManager";
+import { extractXPreviewSource } from "./xPreview";
 
-let keywordEntries: Array<KeywordEntry> = [];
-let currentUser: User;
-let keywordLog: Array<any> = [];
+import { resolveLoadedKeywordEntries } from "./state";
 
-const MenuHeader = findByCodeLazy(".sv)()?(0,");
-const Popout = findByCodeLazy(".loadingMore&&null==");
-const recentMentionsPopoutClass = findByPropsLazy("recentMentionsPopout");
-const createMessageRecord = findByCodeLazy("THREAD_CREATED?[]:(0,");
+let keywordEntries: KeywordEntry[] = [];
+let audioLifecycleToken = 0;
+let keywordMutationRevision = 0;
+const keywordEntryListeners = new Set<() => void>();
+
+function notifyKeywordEntriesChanged() {
+    for (const listener of keywordEntryListeners) listener();
+}
+
 const KEYWORD_ENTRIES_KEY = "KeywordNotify_keywordEntries";
-const KEYWORD_LOG_KEY = "KeywordNotify_log";
+const logger = new Logger("KeywordNotify");
 
-const cl = classNameFactory("vc-keywordnotify-");
+const NotificationSound = findByPropsLazy("playNotificationSound") as {
+    playNotificationSound(sound: string, volume: number): void;
+};
+
+async function persistEntries() {
+    ++keywordMutationRevision;
+    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+}
 
 async function addKeywordEntry(forceUpdate: () => void) {
     keywordEntries.push({ regex: "", listIds: [], listType: ListType.BlackList, ignoreCase: false });
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+    await persistEntries();
     forceUpdate();
 }
 
 async function removeKeywordEntry(idx: number, forceUpdate: () => void) {
     keywordEntries.splice(idx, 1);
-    await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+    await persistEntries();
     forceUpdate();
-}
-
-function safeMatchesRegex(str: string, regex: string, flags: string) {
-    try {
-        return str.match(new RegExp(regex, flags));
-    } catch {
-        return false;
-    }
-}
-
-enum ListType {
-    BlackList = "BlackList",
-    Whitelist = "Whitelist"
-}
-
-function highlightKeywords(str: string, entries: Array<KeywordEntry>) {
-    let regexes: Array<RegExp>;
-    try {
-        regexes = entries.map(e => new RegExp(e.regex, "g" + (e.ignoreCase ? "i" : "")));
-    } catch (err) {
-        return [str];
-    }
-
-    const matches = regexes.map(r => str.match(r)).flat().filter(e => e != null);
-    if (matches.length == 0) {
-        return [str];
-    }
-
-    const idx = str.indexOf(matches[0]);
-
-    return [
-        <span>{str.substring(0, idx)}</span>,
-        <span className="highlight">{matches[0]}</span>,
-        <span>{str.substring(idx + matches[0].length)}</span>
-    ];
 }
 
 function Collapsible({ title, children }) {
@@ -88,12 +73,12 @@ function Collapsible({ title, children }) {
         <div>
             <Button
                 onClick={() => setIsOpen(!isOpen)}
-                look={Button.Looks.BLANK}
-                size={Button.Sizes.ICON}
-                className={cl("collapsible")}>
+                variant="none"
+                size="min"
+                className="vc-keywordnotify-collapsible">
                 <div style={{ display: "flex", alignItems: "center" }}>
                     <div style={{ marginLeft: "auto", color: "var(--text-muted)", paddingRight: "5px" }}>{isOpen ? "▼" : "▶"}</div>
-                    <Forms.FormTitle tag="h4">{title}</Forms.FormTitle>
+                    <Heading tag="h4">{title}</Heading>
                 </div>
             </Button>
             {isOpen && children}
@@ -103,45 +88,37 @@ function Collapsible({ title, children }) {
 
 function ListedIds({ listIds, setListIds }) {
     const update = useForceUpdater();
-    const [values] = useState(listIds);
+    const values = listIds;
 
-    async function onChange(e: string, index: number) {
-        values[index] = e;
-        setListIds(values);
+    async function onChange(value: string, index: number) {
+        values[index] = value;
+        await setListIds(values);
         update();
     }
 
-    const elements = values.map((currentValue: string, index: number) => {
-        return (
-            <Flex flexDirection="row" style={{ marginBottom: "5px" }}>
-                <div style={{ flexGrow: 1 }}>
-                    <TextInput
-                        placeholder="ID"
-                        spellCheck={false}
-                        value={currentValue}
-                        onChange={e => onChange(e, index)}
-                    />
-                </div>
-                <Button
-                    onClick={() => {
-                        values.splice(index, 1);
-                        setListIds(values);
-                        update();
-                    }}
-                    look={Button.Looks.BLANK}
-                    size={Button.Sizes.ICON}
-                    className={cl("delete")}>
-                    <DeleteIcon/>
-                </Button>
-            </Flex>
-        );
-    });
-
-    return (
-        <>
-            {elements}
-        </>
-    );
+    return values.map((currentValue: string, index: number) => (
+        <Flex flexDirection="row" style={{ marginBottom: "5px" }} key={index}>
+            <div style={{ flexGrow: 1 }}>
+                <TextInput
+                    placeholder="ID"
+                    spellCheck={false}
+                    value={currentValue}
+                    onChange={value => void onChange(value, index)}
+                />
+            </div>
+            <Button
+                onClick={() => {
+                    values.splice(index, 1);
+                    void setListIds(values);
+                    update();
+                }}
+                variant="none"
+                size="iconOnly"
+                className="vc-keywordnotify-delete">
+                <DeleteIcon />
+            </Button>
+        </Flex>
+    ));
 }
 
 function ListTypeSelector({ listType, setListType }) {
@@ -151,97 +128,146 @@ function ListTypeSelector({ listType, setListType }) {
                 { label: "Whitelist", value: ListType.Whitelist },
                 { label: "Blacklist", value: ListType.BlackList }
             ]}
-            placeholder={"Select a list type"}
-            isSelected={v => v === listType}
+            placeholder="Select a list type"
+            isSelected={value => value === listType}
             closeOnSelect={true}
-            value={listType}
             select={setListType}
-            serialize={v => v}
+            serialize={value => value}
         />
     );
 }
 
-
 function KeywordEntries() {
     const update = useForceUpdater();
-    const [values] = useState(keywordEntries);
+    const values = keywordEntries;
+    useEffect(() => {
+        keywordEntryListeners.add(update);
+        return () => {
+            keywordEntryListeners.delete(update);
+        };
+    }, [update]);
 
     async function setRegex(index: number, value: string) {
         keywordEntries[index].regex = value;
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistEntries();
         update();
     }
 
     async function setListType(index: number, value: ListType) {
         keywordEntries[index].listType = value;
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistEntries();
         update();
     }
 
-    async function setListIds(index: number, value: Array<string>) {
+    async function setListIds(index: number, value: string[]) {
         keywordEntries[index].listIds = value ?? [];
-        await DataStore.set(KEYWORD_ENTRIES_KEY, keywordEntries);
+        await persistEntries();
         update();
     }
 
-    const elements = keywordEntries.map((entry, i) => {
-        return (
-            <>
-                <Collapsible title={`Keyword Entry ${i + 1}`}>
+    async function setIgnoreCase(index: number, value: boolean) {
+        keywordEntries[index].ignoreCase = value;
+        await persistEntries();
+        update();
+    }
+
+    return (
+        <>
+            {keywordEntries.map((entry, index) => (
+                <Collapsible title={`Keyword Entry ${index + 1}`} key={index}>
                     <Flex flexDirection="row">
                         <div style={{ flexGrow: 1 }}>
                             <TextInput
                                 placeholder="example|regex"
                                 spellCheck={false}
-                                value={values[i].regex}
-                                onChange={e => setRegex(i, e)}
+                                value={values[index].regex}
+                                onChange={value => void setRegex(index, value)}
                             />
                         </div>
                         <Button
-                            onClick={() => removeKeywordEntry(i, update)}
-                            look={Button.Looks.BLANK}
-                            size={Button.Sizes.ICON}
-                            className={cl("delete")}>
-                            <DeleteIcon/>
+                            onClick={() => void removeKeywordEntry(index, update)}
+                            variant="none"
+                            size="iconOnly"
+                            className="vc-keywordnotify-delete">
+                            <DeleteIcon />
                         </Button>
                     </Flex>
-                    <Switch
-                        value={values[i].ignoreCase}
-                        onChange={() => {
-                            values[i].ignoreCase = !values[i].ignoreCase;
-                            update();
-                        }}
-                        style={{ marginTop: "0.5em", marginRight: "40px" }}
-                    >
-                        Ignore Case
-                    </Switch>
-                    <Forms.FormDivider className={[Margins.top8, Margins.bottom8].join(" ") }/>
-                    <Forms.FormTitle tag="h5">Whitelist/Blacklist</Forms.FormTitle>
+                    <FormSwitch
+                        title="Ignore Case"
+                        value={values[index].ignoreCase}
+                        onChange={value => void setIgnoreCase(index, value)}
+                        className={Margins.top8}
+                    />
+                    <Divider className={[Margins.top8, Margins.bottom8].join(" ")} />
+                    <Heading tag="h5">Whitelist/Blacklist</Heading>
                     <Flex flexDirection="row">
                         <div style={{ flexGrow: 1 }}>
-                            <ListedIds listIds={values[i].listIds} setListIds={e => setListIds(i, e)}/>
+                            <ListedIds listIds={values[index].listIds} setListIds={value => setListIds(index, value)} />
                         </div>
                     </Flex>
-                    <div className={[Margins.top8, Margins.bottom8].join(" ") }/>
+                    <div className={[Margins.top8, Margins.bottom8].join(" ")} />
                     <Flex flexDirection="row">
                         <Button onClick={() => {
-                            values[i].listIds.push("");
+                            values[index].listIds.push("");
+                            void persistEntries();
                             update();
-                        }}>Add ID</Button>
+                        }}>
+                            Add ID
+                        </Button>
                         <div style={{ flexGrow: 1 }}>
-                            <ListTypeSelector listType={values[i].listType} setListType={e => setListType(i, e)}/>
+                            <ListTypeSelector listType={values[index].listType} setListType={value => void setListType(index, value)} />
                         </div>
                     </Flex>
                 </Collapsible>
-            </>
-        );
-    });
+            ))}
+            <div><Button onClick={() => void addKeywordEntry(update)}>Add Keyword Entry</Button></div>
+        </>
+    );
+}
+
+function CustomAudioFileSetting({ kind, initialFileName, setValue }: {
+    kind: CustomAudioKind;
+    initialFileName: string;
+    setValue(value: string): void;
+}) {
+    const [fileName, setFileName] = useState(initialFileName);
+    const [busy, setBusy] = useState(false);
+
+    async function selectFile() {
+        setBusy(true);
+        try {
+            const selectedFileName = await selectCustomAudio(kind);
+            if (!selectedFileName) return;
+            setFileName(selectedFileName);
+            setValue(selectedFileName);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function clearFile() {
+        setBusy(true);
+        try {
+            if (!await clearCustomAudio(kind)) {
+                logger.error(`Failed to clear custom ${kind} sound`);
+                return;
+            }
+            setFileName("");
+            setValue("");
+        } finally {
+            setBusy(false);
+        }
+    }
 
     return (
-        <>
-            {elements}
-            <div><Button onClick={() => addKeywordEntry(update)}>Add Keyword Entry</Button></div>
-        </>
+        <Flex flexDirection="row" style={{ alignItems: "center", gap: "8px" }}>
+            <div style={{ flexGrow: 1 }}>
+                <strong>{kind === "link" ? "Custom link sound" : "Custom mention sound"}</strong>
+                <div style={{ color: "var(--text-muted)" }}>{fileName || "Discord default sound"}</div>
+            </div>
+            <Button disabled={busy} onClick={() => void selectFile()}>Select file</Button>
+            {fileName && <Button disabled={busy} variant="secondary" onClick={() => void clearFile()}>Use Discord sound</Button>}
+        </Flex>
     );
 }
 
@@ -251,206 +277,227 @@ const settings = definePluginSettings({
         description: "Ignore messages from bots",
         default: true
     },
+    soundEnabled: {
+        type: OptionType.BOOLEAN,
+        description: "Play a sound for keyword link matches",
+        default: true
+    },
+    linkSoundFile: {
+        type: OptionType.COMPONENT,
+        default: "",
+        component: props => (
+            <CustomAudioFileSetting kind="link" initialFileName={settings.store.linkSoundFile} setValue={props.setValue} />
+        )
+    },
+    soundVolume: {
+        type: OptionType.SLIDER,
+        description: "Link notification volume. Custom sounds support boost up to 300%; Discord fallback is capped at 100%.",
+        markers: [0, 25, 40, 50, 75, 100, 150, 200, 250, 300],
+        default: 40,
+        stickToMarkers: false
+    },
+    mentionSoundEnabled: {
+        type: OptionType.BOOLEAN,
+        description: "Replace Discord's mention sound with a custom audio file",
+        default: true
+    },
+    mentionSoundFile: {
+        type: OptionType.COMPONENT,
+        default: "",
+        component: props => (
+            <CustomAudioFileSetting kind="mention" initialFileName={settings.store.mentionSoundFile} setValue={props.setValue} />
+        )
+    },
+    mentionSoundVolume: {
+        type: OptionType.SLIDER,
+        description: "Mention notification volume. Custom sounds support boost up to 300%; Discord fallback is capped at 100%.",
+        markers: [0, 25, 40, 50, 75, 100, 150, 200, 250, 300],
+        default: 40,
+        stickToMarkers: false
+    },
+    durationSeconds: {
+        type: OptionType.SLIDER,
+        description: "Seconds before an unpinned Discord card closes",
+        markers: [0, 5, 10, 15, 30, 60],
+        default: 15,
+        stickToMarkers: false
+    },
+    pinWhenUnfocused: {
+        type: OptionType.BOOLEAN,
+        description: "Pin the Discord card until you return when Discord is not focused",
+        default: true
+    },
+    historyLimit: {
+        type: OptionType.SLIDER,
+        description: "Number of clickable keyword notifications to keep",
+        markers: [0, 25, 50, 100, 200],
+        default: 50,
+        stickToMarkers: true
+    },
+    history: {
+        type: OptionType.COMPONENT,
+        component: () => <KeywordHistoryButton />
+    },
     keywords: {
         type: OptionType.COMPONENT,
-        component: () => <KeywordEntries/>
+        component: () => <KeywordEntries />
     }
 });
 
 export default definePlugin({
     name: "KeywordNotify",
-    authors: [Devs.camila314],
-    description: "Sends a notification if a given message matches certain keywords or regexes",
+    authors: [{ name: "camila314", id: 0n }],
+    description: "Sends a notification if a message matches a configured keyword or regex",
     settings,
-    patches: [
-        {
-            find: "Dispatch.dispatch(...) called without an action type",
-            replacement: {
-                match: /}_dispatch\((\i),\i\){/,
-                replace: "$&$1=$self.modify($1);"
-            }
-        },
-        {
-            find: "Messages.UNREADS_TAB_LABEL}",
-            replacement: {
-                match: /\i\?\(0,\i\.jsxs\)\(\i\.TabBar\.Item/,
-                replace: "$self.keywordTabBar(),$&"
-            }
-        },
-        {
-            find: "location:\"RecentsPopout\"",
-            replacement: {
-                match: /:(\i)===\i\.\i\.MENTIONS\?\(0,.+?setTab:(\i),onJump:(\i),badgeState:\i,closePopout:(\i)/,
-                replace: ": $1 === 5 ? $self.tryKeywordMenu($2, $3, $4) $&"
-            }
-        },
-        {
-            find: ".guildFilter:null",
-            replacement: {
-                match: /function (\i)\(\i\){let{message:\i,gotoMessage/,
-                replace: "$self.renderMsg = $1; $&"
-            }
-        },
-        {
-            find: ".guildFilter:null",
-            replacement: {
-                match: /onClick:\(\)=>(\i\.\i\.deleteRecentMention\((\i)\.id\))/,
-                replace: "onClick: () => $2._keyword ? $self.deleteKeyword($2.id) : $1"
-            }
+
+    patches: [{
+        find: '"NotificationStore"',
+        replacement: {
+            match: /sound:(\i\?\i:void 0)(?=,volume:\i,onClick)/,
+            replace: "sound:$self.replaceSpecificMentionSound(arguments[0]?.message,$1)"
         }
-    ],
+    }],
 
-    async start() {
-        keywordEntries = await DataStore.get(KEYWORD_ENTRIES_KEY) ?? [];
-        currentUser = UserStore.getCurrentUser();
-        this.onUpdate = () => null;
+    replaceSpecificMentionSound(message: Message | undefined, sound: string | undefined) {
+        if (!message || !sound) return sound;
+        const currentUser = UserStore.getCurrentUser();
+        if (!currentUser) return sound;
 
-        (await DataStore.get(KEYWORD_LOG_KEY) ?? []).map(e => JSON.parse(e)).forEach(e => {
-            this.addToLog(e);
+        const channel = ChannelStore.getChannel(message.channel_id);
+        const guildId = channel?.guild_id;
+        const roleIds = guildId ? GuildMemberStore.getMember(guildId, currentUser.id)?.roles ?? [] : [];
+        return replaceMentionNotificationSound(
+            sound,
+            isSpecificMention(message, currentUser.id, roleIds),
+            {
+                enabled: settings.store.mentionSoundEnabled,
+                volume: settings.store.mentionSoundVolume
+            },
+            (fallbackSound, volume) => NotificationSound.playNotificationSound(fallbackSound, volume)
+        );
+    },
+
+    start() {
+        const lifecycleToken = ++audioLifecycleToken;
+        const loadMutationRevision = keywordMutationRevision;
+        startKeywordNotificationManager(settings.store.historyLimit);
+        void DataStore.get<unknown>(KEYWORD_ENTRIES_KEY).then(entries => {
+            const loadedEntries = resolveLoadedKeywordEntries(
+                entries,
+                lifecycleToken,
+                audioLifecycleToken,
+                loadMutationRevision,
+                keywordMutationRevision
+            );
+            if (loadedEntries) {
+                keywordEntries = loadedEntries;
+                notifyKeywordEntriesChanged();
+            }
+        }).catch(error => logger.error("Failed to load keyword entries", error));
+
+        void loadCustomAudio("link").then(fileName => {
+            if (lifecycleToken === audioLifecycleToken) settings.store.linkSoundFile = reconcileAudioFileName(settings.store.linkSoundFile, fileName);
+        });
+        void loadCustomAudio("mention").then(fileName => {
+            if (lifecycleToken === audioLifecycleToken) settings.store.mentionSoundFile = reconcileAudioFileName(settings.store.mentionSoundFile, fileName);
         });
     },
 
-    applyKeywordEntries(m: Message) {
-        let matches = false;
+    stop() {
+        ++audioLifecycleToken;
+        stopCustomAudio();
+        stopKeywordNotificationManager();
+    },
 
-        for (let entry of keywordEntries) {
-            if (entry.regex === "") {
-                return;
-            }
+    flux: {
+        MESSAGE_CREATE({ message, optimistic }: { message: Message; optimistic?: boolean; }) {
+            if (optimistic || !message?.author) return;
 
-            let listed = entry.listIds.some(id => id === m.channel_id || id === m.author.id);
-            if (!listed) {
-                const channel = ChannelStore.getChannel(m.channel_id);
-                if (channel != null) {
-                    listed = entry.listIds.some(id => id === channel.guild_id);
-                }
-            }
+            const currentUser = UserStore.getCurrentUser();
+            if (!currentUser || message.author.id === currentUser.id) return;
 
-            const whitelistMode = entry.listType === ListType.Whitelist;
+            try {
+                const channel = ChannelStore.getChannel(message.channel_id);
+                const guildId = channel?.guild_id;
+                if (!findKeywordMatch(message, keywordEntries, guildId, settings.store.ignoreBots)) return;
 
-            if (!whitelistMode && listed) {
-                return;
-            }
-            if (whitelistMode && !listed) {
-                return;
-            }
+                let avatarUrl: string | undefined;
+                try {
+                    avatarUrl = message.author.getAvatarURL?.(guildId, 128, false);
+                } catch { }
 
-            if (settings.store.ignoreBots && m.author.bot && (!whitelistMode || !entry.listIds.includes(m.author.id))) {
-                return;
-            }
+                const guild = guildId ? GuildStore.getGuild(guildId) : undefined;
+                const member = guildId ? GuildMemberStore.getMember(guildId, message.author.id) : null;
+                const channelName = channel?.name ? `#${channel.name}` : "Direct Message";
+                const location = guild ? `${guild.name} · ${channelName}` : channelName;
+                const body = getMessageText(message);
+                const bodyMentionIds = [...body.matchAll(/<@!?(\d+)>/g)].map(match => match[1]);
+                const messageMentions = (message as Message & { mentions?: readonly unknown[]; }).mentions;
+                const mentions: NotificationMentions = {
+                    users: resolveUserMentionNames([...(messageMentions ?? []), ...bodyMentionIds], id => {
+                        const user = UserStore.getUser(id);
+                        return user?.globalName || user?.username;
+                    }),
+                    roles: {},
+                    channels: {}
+                };
 
-            const flags = entry.ignoreCase ? "i" : "";
-            if (safeMatchesRegex(m.content, entry.regex, flags)) {
-                matches = true;
-            }
-
-            for (const embed of m.embeds as any) {
-                if (safeMatchesRegex(embed.description, entry.regex, flags) || safeMatchesRegex(embed.title, entry.regex, flags)) {
-                    matches = true;
-                } else if (embed.fields != null) {
-                    for (const field of embed.fields as Array<{ name: string, value: string }>) {
-                        if (safeMatchesRegex(field.value, entry.regex, flags) || safeMatchesRegex(field.name, entry.regex, flags)) {
-                            matches = true;
-                        }
+                if (guildId) {
+                    for (const match of body.matchAll(/<@&(\d+)>/g)) {
+                        const role = GuildRoleStore.getRole(guildId, match[1]);
+                        if (role) mentions.roles![match[1]] = role.name;
                     }
                 }
+                for (const match of body.matchAll(/<#(\d+)>/g)) {
+                    const mentionedChannel = ChannelStore.getChannel(match[1]);
+                    if (mentionedChannel?.name) mentions.channels![match[1]] = mentionedChannel.name;
+                }
+                const xPreviewSource = extractXPreviewSource(message);
+                const image = xPreviewSource
+                    ? selectXPreviewImage(message.embeds, xPreviewSource.embedIndex)
+                    : selectNotificationImage({ attachments: message.attachments, embeds: message.embeds });
+
+
+                deliverKeywordNotification({
+                    id: `keyword-${message.id}`,
+                    channelId: message.channel_id,
+                    guildId,
+                    messageId: message.id,
+                    authorName: member?.nick || message.author.globalName || message.author.username,
+                    authorColor: member?.colorString || message.colorString || undefined,
+                    senderType: message.author.bot ? "bot" : "user",
+                    avatarUrl,
+                    location,
+                    body,
+                    discordContext: xPreviewSource?.discordContext,
+                    mentions,
+                    imageUrl: image?.previewUrl,
+                    imageTargetUrl: image?.targetUrl,
+                    xPreview: xPreviewSource?.preview,
+
+                    timestamp: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now()
+                }, {
+                    durationMs: settings.store.durationSeconds * 1000,
+                    historyLimit: settings.store.historyLimit,
+                    pinWhenUnfocused: settings.store.pinWhenUnfocused,
+                    soundEnabled: settings.store.soundEnabled,
+                    soundVolume: settings.store.soundVolume
+                });
+            } catch (error) {
+                logger.error("Failed to process message", error);
             }
-        }
+        },
 
-        if (matches) {
-            m.mentions.push(currentUser);
+        MESSAGE_UPDATE({ message }: { message?: unknown; }) {
+            const xPreviewUpdate = selectXPreviewImageUpdate(message);
+            const genericUpdate = selectNotificationImageUpdate(message);
+            const messageId = xPreviewUpdate?.messageId ?? genericUpdate?.messageId;
+            if (!messageId) return;
 
-            if (m.author.id !== currentUser.id)
-                this.addToLog(m);
-        }
-    },
-
-    addToLog(m: Message) {
-        if (m == null || keywordLog.some(e => e.id === m.id))
-            return;
-
-        DataStore.get(KEYWORD_LOG_KEY).then(log => {
-            DataStore.set(KEYWORD_LOG_KEY, [...log, JSON.stringify(m)]);
-        });
-
-        const thing = createMessageRecord(m);
-        keywordLog.push(thing);
-        keywordLog.sort((a, b) => b.timestamp - a.timestamp);
-
-        if (keywordLog.length > 50)
-            keywordLog.pop();
-
-        this.onUpdate();
-    },
-
-    deleteKeyword(id) {
-        keywordLog = keywordLog.filter(e => e.id !== id);
-        this.onUpdate();
-    },
-
-    keywordTabBar() {
-        return (
-            <TabBar.Item className="vc-settings-tab-bar-item" id={5}>
-                Keywords
-            </TabBar.Item>
-        );
-    },
-
-    tryKeywordMenu(setTab, onJump, closePopout) {
-        const header = (
-            <MenuHeader tab={5} setTab={setTab} closePopout={closePopout} badgeState={{ badgeForYou: false }}/>
-        );
-
-        const channel = ChannelStore.getChannel(SelectedChannelStore.getChannelId());
-
-        const [tempLogs, setKeywordLog] = useState(keywordLog);
-        this.onUpdate = () => {
-            const newLog = Array.from(keywordLog);
-            setKeywordLog(newLog);
-        };
-
-        const messageRender = (e, t) => {
-            e._keyword = true;
-
-            e.customRenderedContent = {
-                content: highlightKeywords(e.content, keywordEntries)
-            };
-
-            const msg = this.renderMsg({
-                message: e,
-                gotoMessage: t,
-                dismissible: true
+            enrichKeywordNotificationImage(messageId, {
+                ...(genericUpdate ? { generic: genericUpdate.image } : {}),
+                ...(xPreviewUpdate ? { xPreview: { url: xPreviewUpdate.xPreviewUrl, image: xPreviewUpdate.image } } : {})
             });
-
-            return [msg];
-        };
-
-        return (
-            <>
-                <Popout
-                    className={recentMentionsPopoutClass.recentMentionsPopout}
-                    renderHeader={() => header}
-                    renderMessage={messageRender}
-                    channel={channel}
-                    onJump={onJump}
-                    onFetch={() => null}
-                    onCloseMessage={this.deleteKeyword}
-                    loadMore={() => null}
-                    messages={tempLogs}
-                    renderEmptyState={() => null}
-                />
-            </>
-        );
-    },
-
-    modify(e) {
-        if (e.type === "MESSAGE_CREATE") {
-            this.applyKeywordEntries(e.message);
-        } else if (e.type === "LOAD_MESSAGES_SUCCESS") {
-            for (let msg = 0; msg < e.messages.length; ++msg) {
-                this.applyKeywordEntries(e.messages[msg]);
-            }
         }
-        return e;
     }
 });
