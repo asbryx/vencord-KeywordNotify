@@ -1,7 +1,7 @@
-import { Parser, useState } from "@webpack/common";
+import { Parser, useEffect, useState } from "@webpack/common";
 import type { CSSProperties } from "react";
 
-import { createMessageViewModel, type MessageEmbedViewModel } from "./messageViewModel";
+import { createMessageViewModel, formatDiscordTimestamp, getMessageMediaLayout, getMillisecondsUntilNextLocalDay, type MessageEmbedViewModel } from "./messageViewModel";
 import type { MessageSnapshot, MessageSnapshotMedia } from "./messageSnapshot";
 import { routeNestedNotificationInteraction } from "./notificationInteractions";
 
@@ -87,6 +87,7 @@ function MessageMedia({ media }: { media: MessageSnapshotMedia; }) {
             type="button"
             className="vc-keywordnotify-message-media"
             data-kind={media.kind}
+            data-layout={getMessageMediaLayout(media)}
             aria-label={label}
             onClick={event => {
                 routeNestedNotificationInteraction(event);
@@ -192,7 +193,7 @@ function MessageEmbed({ embed, context }: { embed: MessageEmbedViewModel; contex
                     {embed.footer?.text && <span>{embed.footer.text}</span>}
                     {embed.footer && validTimestamp && <span aria-hidden="true">•</span>}
                     {validTimestamp && (
-                        <time dateTime={validTimestamp.toISOString()}>{validTimestamp.toLocaleString()}</time>
+                        <time dateTime={validTimestamp.toISOString()}>{formatDiscordTimestamp(validTimestamp)}</time>
                     )}
                 </footer>
             )}
@@ -201,6 +202,20 @@ function MessageEmbed({ embed, context }: { embed: MessageEmbedViewModel; contex
 }
 
 export function MessageSnapshotView({ snapshot, channelId, messageId }: MessageSnapshotViewProps) {
+    const [timestampRevision, setTimestampRevision] = useState(0);
+    const hasTimestamp = snapshot.embeds.some(embed => {
+        const timestamp = embed.timestamp == null ? undefined : new Date(embed.timestamp);
+        return timestamp != null && Number.isFinite(timestamp.getTime());
+    });
+    useEffect(() => {
+        if (!hasTimestamp) return;
+        const timer = window.setTimeout(
+            () => setTimestampRevision(current => current + 1),
+            getMillisecondsUntilNextLocalDay()
+        );
+        return () => window.clearTimeout(timer);
+    }, [hasTimestamp, timestampRevision]);
+
     const context: MarkdownContext = {
         channelId,
         messageId,

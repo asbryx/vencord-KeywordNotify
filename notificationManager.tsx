@@ -152,7 +152,8 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
     }, [notification.id, pinned, hovered, focused, notification.durationMs]);
 
     const progress = notification.durationMs === 0 ? 100 : remainingMs / notification.durationMs * 100;
-    const deliveredAt = new Date(notification.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const deliveredDate = new Date(notification.timestamp);
+    const deliveredAt = deliveredDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     return (
         <article
@@ -191,7 +192,11 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
                             {notification.senderType === "bot" ? "BOT" : "USER"}
                         </span>
                     </div>
-                    <span>{notification.location} · <time>{deliveredAt}</time></span>
+                    <div className="vc-keywordnotify-meta">
+                        <span className="vc-keywordnotify-location">{notification.location}</span>
+                        <span aria-hidden={true}>·</span>
+                        <time className="vc-keywordnotify-delivered-at" dateTime={deliveredDate.toISOString()}>{deliveredAt}</time>
+                    </div>
                 </div>
                 <div className="vc-keywordnotify-controls">
                     <Button

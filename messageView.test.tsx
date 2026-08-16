@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createMessageViewModel } from "./messageViewModel";
+import { createMessageViewModel, formatDiscordTimestamp, getMessageMediaLayout, getMillisecondsUntilNextLocalDay } from "./messageViewModel";
 import type { MessageSnapshot } from "./messageSnapshot";
 
 const snapshot: MessageSnapshot = {
@@ -110,4 +110,57 @@ test("keeps embed media grouped inside its embed instead of flattening it", () =
     assert.equal(model.filter(block => block.kind === "attachment").length, 1);
     assert.equal(embed.fields[0].inline, true);
     assert.equal(embed.fields[2].inline, false);
+});
+
+test("uses full layout for landscape Discord thumbnails", () => {
+    assert.equal(getMessageMediaLayout({
+        kind: "thumbnail",
+        previewUrl: "https://images-ext-1.discordapp.net/opengraph-image",
+        targetUrl: "https://opensea.io/collection/sad-cat-/overview",
+        width: 1200,
+        height: 630
+    }), "full");
+});
+
+test("classifies square and portrait thumbnails for larger proportional layouts", () => {
+    assert.equal(getMessageMediaLayout({
+        kind: "thumbnail",
+        previewUrl: "https://images-ext-1.discordapp.net/avatar.png",
+        targetUrl: "https://example.com",
+        width: 96,
+        height: 96
+    }), "square");
+    assert.equal(getMessageMediaLayout({
+        kind: "thumbnail",
+        previewUrl: "https://images-ext-1.discordapp.net/portrait.png",
+        targetUrl: "https://example.com",
+        width: 800,
+        height: 1200
+    }), "portrait");
+    assert.equal(getMessageMediaLayout({
+        kind: "thumbnail",
+        previewUrl: "https://images-ext-1.discordapp.net/unknown.png",
+        targetUrl: "https://example.com"
+    }), "compact");
+    assert.equal(getMessageMediaLayout({
+        kind: "image",
+        previewUrl: "https://images-ext-1.discordapp.net/image.png",
+        targetUrl: "https://example.com"
+    }), "full");
+});
+
+test("formats embed timestamps with Discord day labels and no seconds", () => {
+    const now = new Date(2026, 7, 16, 20, 30, 45);
+
+    assert.equal(formatDiscordTimestamp(new Date(2026, 7, 16, 14, 48, 18), now), "Today at 2:48 PM");
+    assert.equal(formatDiscordTimestamp(new Date(2026, 7, 15, 23, 20, 59), now), "Yesterday at 11:20 PM");
+    assert.equal(formatDiscordTimestamp(new Date(2026, 7, 14, 9, 15, 33), now), "8/14/2026 at 9:15 AM");
+    assert.equal(
+        formatDiscordTimestamp(new Date(2025, 11, 31, 23, 59), new Date(2026, 0, 1, 0, 1)),
+        "Yesterday at 11:59 PM"
+    );
+});
+
+test("schedules a timestamp refresh at the next local calendar day", () => {
+    assert.equal(getMillisecondsUntilNextLocalDay(new Date(2025, 11, 31, 23, 59, 59, 900)), 100);
 });
