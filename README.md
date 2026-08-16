@@ -10,7 +10,7 @@ This repository is a maintained fork of [camila314/vencord-KeywordNotify](https:
 - Apply each pattern globally or limit it with guild, channel, and user IDs.
 - Ignore bot messages globally, with an explicit whitelist override for a bot user ID.
 - Show clickable cards with author, server, channel, message text, mentions, media, and delivery time.
-- Show structured X post and quote previews while preserving the surrounding Discord message context.
+- Preserve Discord message content, structured embeds, fields, media, and attachments in live cards and History.
 - Open the original Discord message from a live card or History entry.
 - Pin cards manually or automatically while Discord is unfocused.
 - Keep a configurable local notification History.
@@ -138,7 +138,7 @@ The included `.gitignore` excludes common environment files, keys, databases, lo
 Run the focused tests from a Vencord source checkout:
 
 ```bash
-pnpm exec tsx --test src/userplugins/KeywordNotify/*.test.ts
+pnpm exec tsx --test src/userplugins/KeywordNotify/*.test.ts*
 ```
 
 Run the Vencord TypeScript check:
@@ -147,7 +147,7 @@ Run the Vencord TypeScript check:
 pnpm testTsc
 ```
 
-The `v1.0.0` release passed 104 focused tests and the Vencord TypeScript check.
+The current version passed 85 focused tests, the Vencord TypeScript check, and the production build.
 
 ## Releases
 

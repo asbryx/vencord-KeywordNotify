@@ -3,15 +3,13 @@ import { Button } from "@components/Button";
 import { Flex } from "@components/Flex";
 import { useAwaiter } from "@utils/react";
 import type { RenderModalProps } from "@vencord/discord-types";
-import { ConfirmModal, Modal, openModal, useEffect, useState } from "@webpack/common";
+import { ConfirmModal, Modal, openModal, useState } from "@webpack/common";
 
-import { splitNotificationText } from "./content";
 import type { KeywordNotificationData } from "./notificationManager";
 import { clearKeywordNotificationHistory, navigateToKeywordMessage } from "./notificationManager";
-import { isDiscordMediaUrl, sanitizePersistedNotificationImage } from "./media";
+import { isDiscordMediaUrl } from "./media";
+import { MessageSnapshotView } from "./messageView";
 import { sanitizeKeywordHistory } from "./state";
-
-import { XPreview } from "./xPreviewView";
 
 
 
@@ -33,16 +31,11 @@ function KeywordHistoryEntryCard({
     entry: KeywordHistoryEntry;
     onClose: () => void;
 }) {
-    const [imageFailed, setImageFailed] = useState(false);
-    const bodySegments = entry.xPreview ? undefined : splitNotificationText(entry.body, entry.mentions);
-    const image = sanitizePersistedNotificationImage(entry.imageUrl, entry.imageTargetUrl);
-    useEffect(() => setImageFailed(false), [image?.previewUrl]);
 
 
     return (
         <article
             className="vc-keywordnotify-history-entry"
-            data-x-preview={entry.xPreview != null}
             tabIndex={0}
             aria-label={`Open Discord message from ${entry.authorName}`}
             onClick={() => {
@@ -68,35 +61,11 @@ function KeywordHistoryEntryCard({
                     </div>
                 </Flex>
                 <span className="vc-keywordnotify-history-location">{entry.location} · <time>{new Date(entry.timestamp).toLocaleString()}</time></span>
-                {entry.xPreview ? <XPreview preview={entry.xPreview} image={image} /> : <>
-                    <p className="vc-keywordnotify-history-body">{bodySegments!.map((segment, index) => segment.type === "link" ? (
-                        <a
-                            key={index}
-                            href={segment.value}
-                            onClick={event => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                VencordNative.native.openExternal(segment.value);
-                            }}>
-                            {segment.label ?? segment.value}
-                        </a>
-                    ) : segment.type === "mention" ? (
-                        <span key={index} className="vc-keywordnotify-mention" data-mention-kind={segment.kind}>{segment.value}</span>
-                    ) : segment.value)}</p>
-                    {image && !imageFailed && (
-                        <img
-                            className="vc-keywordnotify-image"
-                            src={image.previewUrl}
-                            alt="Message attachment"
-                            onError={() => setImageFailed(true)}
-                            onClick={event => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                VencordNative.native.openExternal(image.targetUrl);
-                            }}
-                        />
-                    )}
-                </>}
+                <MessageSnapshotView
+                    snapshot={entry.snapshot}
+                    channelId={entry.channelId}
+                    messageId={entry.messageId}
+                />
             </div>
         </article>
     );

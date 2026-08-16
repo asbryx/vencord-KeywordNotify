@@ -20,16 +20,14 @@ import { useForceUpdater } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import type { Message } from "@vencord/discord-types";
 import { findByPropsLazy } from "@webpack";
-import { ChannelStore, GuildMemberStore, GuildRoleStore, GuildStore, Select, TextInput, UserStore, useEffect, useState } from "@webpack/common";
+import { ChannelStore, GuildMemberStore, GuildStore, Select, TextInput, UserStore, useEffect, useState } from "@webpack/common";
 
 import { clearCustomAudio, loadCustomAudio, reconcileAudioFileName, replaceMentionNotificationSound, selectCustomAudio, stopCustomAudio, type CustomAudioKind } from "./audio";
-import type { NotificationMentions } from "./content";
 import { KeywordHistoryButton } from "./history";
-import { findKeywordMatch, getMessageText, KeywordEntry, ListType } from "./matcher";
-import { selectNotificationImage, selectNotificationImageUpdate, selectXPreviewImage, selectXPreviewImageUpdate } from "./media";
-import { isSpecificMention, resolveUserMentionNames } from "./mentions";
-import { deliverKeywordNotification, enrichKeywordNotificationImage, startKeywordNotificationManager, stopKeywordNotificationManager } from "./notificationManager";
-import { extractXPreviewSource } from "./xPreview";
+import { findKeywordMatch, KeywordEntry, ListType } from "./matcher";
+import { createMessageSnapshot, createMessageSnapshotMediaUpdate } from "./messageSnapshot";
+import { isSpecificMention } from "./mentions";
+import { deliverKeywordNotification, enrichKeywordNotificationSnapshot, startKeywordNotificationManager, stopKeywordNotificationManager } from "./notificationManager";
 
 import { resolveLoadedKeywordEntries } from "./state";
 
@@ -430,32 +428,7 @@ export default definePlugin({
                 const member = guildId ? GuildMemberStore.getMember(guildId, message.author.id) : null;
                 const channelName = channel?.name ? `#${channel.name}` : "Direct Message";
                 const location = guild ? `${guild.name} · ${channelName}` : channelName;
-                const body = getMessageText(message);
-                const bodyMentionIds = [...body.matchAll(/<@!?(\d+)>/g)].map(match => match[1]);
-                const messageMentions = (message as Message & { mentions?: readonly unknown[]; }).mentions;
-                const mentions: NotificationMentions = {
-                    users: resolveUserMentionNames([...(messageMentions ?? []), ...bodyMentionIds], id => {
-                        const user = UserStore.getUser(id);
-                        return user?.globalName || user?.username;
-                    }),
-                    roles: {},
-                    channels: {}
-                };
-
-                if (guildId) {
-                    for (const match of body.matchAll(/<@&(\d+)>/g)) {
-                        const role = GuildRoleStore.getRole(guildId, match[1]);
-                        if (role) mentions.roles![match[1]] = role.name;
-                    }
-                }
-                for (const match of body.matchAll(/<#(\d+)>/g)) {
-                    const mentionedChannel = ChannelStore.getChannel(match[1]);
-                    if (mentionedChannel?.name) mentions.channels![match[1]] = mentionedChannel.name;
-                }
-                const xPreviewSource = extractXPreviewSource(message);
-                const image = xPreviewSource
-                    ? selectXPreviewImage(message.embeds, xPreviewSource.embedIndex)
-                    : selectNotificationImage({ attachments: message.attachments, embeds: message.embeds });
+                const snapshot = createMessageSnapshot(message);
 
 
                 deliverKeywordNotification({
@@ -468,12 +441,7 @@ export default definePlugin({
                     senderType: message.author.bot ? "bot" : "user",
                     avatarUrl,
                     location,
-                    body,
-                    discordContext: xPreviewSource?.discordContext,
-                    mentions,
-                    imageUrl: image?.previewUrl,
-                    imageTargetUrl: image?.targetUrl,
-                    xPreview: xPreviewSource?.preview,
+                    snapshot,
 
                     timestamp: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now()
                 }, {
@@ -489,15 +457,8 @@ export default definePlugin({
         },
 
         MESSAGE_UPDATE({ message }: { message?: unknown; }) {
-            const xPreviewUpdate = selectXPreviewImageUpdate(message);
-            const genericUpdate = selectNotificationImageUpdate(message);
-            const messageId = xPreviewUpdate?.messageId ?? genericUpdate?.messageId;
-            if (!messageId) return;
-
-            enrichKeywordNotificationImage(messageId, {
-                ...(genericUpdate ? { generic: genericUpdate.image } : {}),
-                ...(xPreviewUpdate ? { xPreview: { url: xPreviewUpdate.xPreviewUrl, image: xPreviewUpdate.image } } : {})
-            });
+            const update = createMessageSnapshotMediaUpdate(message);
+            if (update) enrichKeywordNotificationSnapshot(update);
         }
     }
 });

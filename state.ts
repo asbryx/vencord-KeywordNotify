@@ -1,6 +1,7 @@
 import type { KeywordEntry } from "./matcher";
-import { getCanonicalXStatusUrl, sanitizePersistedXPreview } from "./xPreview";
-
+import { isDiscordMediaUrl } from "./media";
+import { sanitizeMessageSnapshot, updateMessageSnapshotMedia } from "./messageSnapshot";
+import type { MessageSnapshot, MessageSnapshotMediaUpdate } from "./messageSnapshot";
 
 export function resolveLoadedKeywordEntries(
     value: unknown,
@@ -13,43 +14,83 @@ export function resolveLoadedKeywordEntries(
     return Array.isArray(value) ? value as KeywordEntry[] : [];
 }
 
-function removeTransientHistoryFields(value: unknown) {
-    if (value == null || typeof value !== "object" || Array.isArray(value)) return value;
 
-    const record = value as Record<string, unknown>;
-    if (
-        !Object.prototype.hasOwnProperty.call(record, "matchedPattern")
-        && !Object.prototype.hasOwnProperty.call(record, "discordContext")
-        && !Object.prototype.hasOwnProperty.call(record, "saved")
-    ) return value;
+function createLegacyMessageSnapshot(value: Record<string, unknown>) {
+    if (typeof value.body !== "string") return;
 
-    const { matchedPattern: _matchedPattern, discordContext: _discordContext, saved: _saved, ...rest } = record;
-    return rest;
+    const hasImage = Object.prototype.hasOwnProperty.call(value, "imageUrl")
+        || Object.prototype.hasOwnProperty.call(value, "imageTargetUrl");
+
+    return sanitizeMessageSnapshot({
+        content: value.body,
+        embeds: [],
+        attachments: hasImage ? [{
+            kind: "attachment",
+            previewUrl: value.imageUrl,
+            targetUrl: value.imageTargetUrl
+        }] : []
+    });
+}
+
+function isNonEmptyString(value: unknown): value is string {
+    return typeof value === "string" && value.length > 0;
+}
+
+function hasValidHistoryMetadata(value: Record<string, unknown>) {
+    return isNonEmptyString(value.id)
+        && isNonEmptyString(value.channelId)
+        && isNonEmptyString(value.messageId)
+        && isNonEmptyString(value.authorName)
+        && (value.senderType === "bot" || value.senderType === "user")
+        && isNonEmptyString(value.location)
+        && typeof value.timestamp === "number"
+        && Number.isFinite(value.timestamp);
+}
+
+function isSafeAuthorColor(value: unknown): value is string {
+    return typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
 }
 
 function sanitizeHistoryEntry(value: unknown) {
-    const withoutTransientFields = removeTransientHistoryFields(value);
-    if (withoutTransientFields == null || typeof withoutTransientFields !== "object" || Array.isArray(withoutTransientFields)) return withoutTransientFields;
+    if (value == null || typeof value !== "object" || Array.isArray(value)) return;
 
-    const entry = withoutTransientFields as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(entry, "xPreview")) return withoutTransientFields;
+    const record = value as Record<string, unknown>;
+    if (!hasValidHistoryMetadata(record)) return;
+    const snapshot = Object.prototype.hasOwnProperty.call(record, "snapshot")
+        ? sanitizeMessageSnapshot(record.snapshot)
+        : createLegacyMessageSnapshot(record);
+    if (!snapshot) return;
 
-    const xPreview = sanitizePersistedXPreview(entry.xPreview);
-    if (xPreview) return { ...entry, xPreview };
-
-    const { xPreview: _xPreview, ...rest } = entry;
-    return rest;
+    return {
+        id: record.id as string,
+        channelId: record.channelId as string,
+        ...(isNonEmptyString(record.guildId) ? { guildId: record.guildId } : {}),
+        messageId: record.messageId as string,
+        authorName: record.authorName as string,
+        ...(isDiscordMediaUrl(record.avatarUrl) ? { avatarUrl: record.avatarUrl } : {}),
+        ...(isSafeAuthorColor(record.authorColor) ? { authorColor: record.authorColor } : {}),
+        senderType: record.senderType as "bot" | "user",
+        location: record.location as string,
+        snapshot,
+        timestamp: record.timestamp as number,
+        ...(typeof record.pinned === "boolean" ? { pinned: record.pinned } : {})
+    };
 }
 
 export function sanitizeKeywordHistory(value: unknown, historyLimit?: number) {
     if (!Array.isArray(value)) return value;
 
     let changed = false;
-    const sanitized = value.map(entry => {
+    const sanitized: object[] = [];
+    for (const entry of value) {
         const result = sanitizeHistoryEntry(entry);
+        if (result == null) {
+            changed = true;
+            continue;
+        }
         if (result !== entry) changed = true;
-        return result;
-    });
+        sanitized.push(result);
+    }
     const retained = historyLimit == null ? sanitized : retainKeywordHistory(sanitized, historyLimit);
     return changed || retained.length !== value.length ? retained : value;
 }
@@ -75,7 +116,7 @@ function removeHistoryMessage(history: unknown[], messageId: string | undefined)
 }
 
 function createKeywordHistoryEntry(data: object, pinned: boolean) {
-    return removeTransientHistoryFields({ ...data, pinned: Boolean(pinned) });
+    return sanitizeHistoryEntry({ ...data, pinned: Boolean(pinned) });
 }
 
 export function mergeKeywordHistory(
@@ -91,56 +132,33 @@ export function mergeKeywordHistory(
     const history = Array.isArray(sanitized) ? sanitized : [];
     const messageId = getHistoryMessageId(data);
     const entry = createKeywordHistoryEntry(data, pinned);
-    return retainKeywordHistory([entry, ...removeHistoryMessage(history, messageId)], historyLimit);
+    return retainKeywordHistory(entry ? [entry, ...removeHistoryMessage(history, messageId)] : history, historyLimit);
 }
 
-
-interface NotificationImage {
-    previewUrl: string;
-    targetUrl: string;
-}
-
-interface NotificationImageUpdate {
-    generic?: NotificationImage;
-    xPreview?: { url: string; image: NotificationImage; };
-}
-
-interface NotificationWithImage {
+interface NotificationWithSnapshot {
     messageId: string;
-    imageUrl?: string;
-    imageTargetUrl?: string;
-    xPreview?: { url: string; };
+    snapshot?: MessageSnapshot;
 }
 
-export function updateNotificationImage<T extends NotificationWithImage>(
+export function updateNotificationSnapshot<T extends NotificationWithSnapshot>(
     notifications: T[],
-    messageId: string,
-    update: NotificationImageUpdate
+    update: MessageSnapshotMediaUpdate
 ): T[] {
-    const index = notifications.findIndex(notification => notification.messageId === messageId);
+    const index = notifications.findIndex(notification => notification.messageId === update.messageId);
     if (index === -1) return notifications;
 
     const notification = notifications[index];
-    const storedXPreviewUrl = getCanonicalXStatusUrl(notification.xPreview?.url);
-    const updateXPreviewUrl = getCanonicalXStatusUrl(update.xPreview?.url);
-    const selectedImage = notification.xPreview
-        ? storedXPreviewUrl != null && storedXPreviewUrl === updateXPreviewUrl ? update.xPreview?.image : undefined
-        : update.generic;
-    if (!selectedImage || (notification.imageUrl === selectedImage.previewUrl && notification.imageTargetUrl === selectedImage.targetUrl)) return notifications;
+    if (!notification.snapshot) return notifications;
 
+    const snapshot = updateMessageSnapshotMedia(notification.snapshot, update);
     const updated = notifications.slice();
-    updated[index] = {
-        ...notification,
-        imageUrl: selectedImage.previewUrl,
-        imageTargetUrl: selectedImage.targetUrl
-    };
+    updated[index] = { ...notification, snapshot };
     return updated;
 }
 
-export function createNotificationImageUpdater<T extends NotificationWithImage>(
-    messageId: string,
-    image: NotificationImageUpdate,
+export function createNotificationSnapshotUpdater<T extends NotificationWithSnapshot>(
+    update: MessageSnapshotMediaUpdate,
     isCurrent: () => boolean
 ) {
-    return (history: T[]) => isCurrent() ? updateNotificationImage(history, messageId, image) : history;
+    return (history: T[]) => isCurrent() ? updateNotificationSnapshot(history, update) : history;
 }

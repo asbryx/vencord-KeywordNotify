@@ -154,186 +154,6 @@
 }
 
 
-.vc-keywordnotify-card-body {
-    display: -webkit-box;
-    overflow: hidden;
-    margin-top: 12px;
-    color: var(--text-normal);
-    font-size: 14px;
-    line-height: 1.45;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 12;
-}
-
-.vc-keywordnotify-card-body a {
-    color: var(--text-link);
-    text-decoration: underline;
-}
-
-.vc-keywordnotify-discord-context {
-    display: -webkit-box;
-    overflow: hidden;
-    margin: 10px 0 0;
-    color: var(--text-default);
-    font-size: 14px;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
-
-.vc-keywordnotify-discord-context a {
-    color: var(--text-link);
-    text-decoration: underline;
-}
-
-.vc-keywordnotify-mention {
-    padding: 0 2px;
-    border-radius: 3px;
-    background: color-mix(in srgb, var(--brand-500) 20%, transparent);
-    color: var(--brand-200);
-    font-weight: 500;
-}
-
-.vc-keywordnotify-image {
-    display: block;
-    width: 100%;
-    max-height: 180px;
-    margin-top: 12px;
-    border-radius: 8px;
-    background: var(--background-secondary);
-    cursor: pointer;
-    object-fit: contain;
-}
-
-.vc-keywordnotify-x-preview {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-.vc-keywordnotify-x-header {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 8px;
-}
-
-.vc-keywordnotify-x-brand {
-    display: grid;
-    width: 22px;
-    height: 22px;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 5px;
-    background: var(--text-default);
-    color: var(--background-base-low);
-    font-size: 12px;
-    font-weight: 800;
-}
-
-.vc-keywordnotify-x-author {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    line-height: 1.2;
-}
-
-.vc-keywordnotify-x-author strong,
-.vc-keywordnotify-x-author span,
-.vc-keywordnotify-x-quote strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.vc-keywordnotify-x-author span,
-.vc-keywordnotify-x-quote span {
-    color: var(--text-muted);
-    font-size: 12px;
-    font-weight: 400;
-}
-
-.vc-keywordnotify-x-author a {
-    color: var(--text-link);
-    text-decoration: none;
-}
-
-.vc-keywordnotify-x-author a:hover {
-    text-decoration: underline;
-}
-
-.vc-keywordnotify-x-text,
-.vc-keywordnotify-x-quote-text {
-    margin: 0;
-    color: var(--text-normal);
-    font-size: 14px;
-    line-height: 1.35;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-}
-
-.vc-keywordnotify-x-text[data-collapsed="true"],
-.vc-keywordnotify-x-quote-text[data-collapsed="true"] {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
-}
-
-.vc-keywordnotify-x-expand {
-    min-height: 32px;
-    padding: 0;
-}
-
-.vc-keywordnotify-x-quote {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-    margin: 0;
-    padding: 6px 8px;
-    border-left: 2px solid var(--border-subtle);
-    background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
-}
-
-.vc-keywordnotify-x-media {
-    display: block;
-    width: 100%;
-    max-height: 180px;
-    padding: 0;
-    overflow: hidden;
-    border: 0;
-    border-radius: 6px;
-    background: var(--background-secondary);
-    cursor: pointer;
-    transition: opacity 120ms ease, transform 120ms ease;
-}
-
-.vc-keywordnotify-x-media:hover {
-    opacity: 0.88;
-}
-
-.vc-keywordnotify-x-media:active {
-    transform: scale(0.99);
-}
-
-.vc-keywordnotify-x-media:focus-visible {
-    outline: 2px solid var(--border-focus);
-    outline-offset: 2px;
-}
-
-.vc-keywordnotify-x-media img {
-    display: block;
-    width: 100%;
-    max-height: 180px;
-    object-fit: contain;
-}
 
  .vc-keywordnotify-card-footer {
     display: none;
@@ -382,16 +202,6 @@
     flex: 1;
 }
 
-.vc-keywordnotify-history-content > .vc-keywordnotify-history-body {
-    display: -webkit-box;
-    overflow: hidden;
-    margin: 8px 0;
-    color: var(--text-normal);
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
-}
 
 .vc-keywordnotify-history-header {
     flex-wrap: wrap;
@@ -412,21 +222,250 @@
         padding: 10px 10px 14px;
     }
 
-    .vc-keywordnotify-x-preview {
-        gap: 4px;
-        margin-top: 6px;
+}
+
+.vc-keywordnotify-message {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    color: var(--text-normal);
+    font-size: 14px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.vc-keywordnotify-message-markdown {
+    min-width: 0;
+}
+
+.vc-keywordnotify-message-markdown > :first-child {
+    margin-top: 0;
+}
+
+.vc-keywordnotify-message-markdown > :last-child {
+    margin-bottom: 0;
+}
+
+.vc-keywordnotify-message-markdown p {
+    margin: 0 0 8px;
+}
+
+.vc-keywordnotify-message-markdown h1,
+.vc-keywordnotify-message-markdown h2,
+.vc-keywordnotify-message-markdown h3 {
+    margin: 8px 0 4px;
+    color: var(--header-primary);
+    font-size: 1em;
+    line-height: 1.3;
+}
+
+.vc-keywordnotify-message-markdown ul,
+.vc-keywordnotify-message-markdown ol {
+    margin: 4px 0;
+    padding-left: 24px;
+}
+
+.vc-keywordnotify-message-markdown a {
+    color: var(--text-link);
+    text-decoration: none;
+}
+
+.vc-keywordnotify-message-markdown a:hover {
+    text-decoration: underline;
+}
+
+.vc-keywordnotify-message-content {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: pre-wrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 12;
+}
+
+.vc-keywordnotify-message-embed {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+}
+
+.vc-keywordnotify-message-embed-author {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    color: var(--header-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+    text-decoration: none;
+}
+
+a.vc-keywordnotify-message-embed-author:hover {
+    color: var(--header-primary);
+    text-decoration: underline;
+}
+
+.vc-keywordnotify-message-embed-author-icon {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.vc-keywordnotify-message-embed-title {
+    width: fit-content;
+    max-width: 100%;
+    color: color-mix(in srgb, var(--text-link) 82%, var(--vc-keywordnotify-embed-color, var(--text-link)));
+    font-weight: 600;
+    line-height: 1.3;
+    text-decoration: none;
+}
+
+a.vc-keywordnotify-message-embed-title:hover {
+    text-decoration: underline;
+}
+
+.vc-keywordnotify-message-embed-title > :first-child,
+.vc-keywordnotify-message-embed-title > :last-child {
+    margin: 0;
+}
+
+.vc-keywordnotify-message-embed-description {
+    color: var(--text-normal);
+}
+
+.vc-keywordnotify-message-embed-description a,
+.vc-keywordnotify-message-embed-field-value a {
+    color: color-mix(in srgb, var(--text-link) 90%, var(--vc-keywordnotify-embed-color, var(--text-link)));
+}
+
+.vc-keywordnotify-message a:focus-visible {
+    border-radius: 2px;
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+.vc-keywordnotify-message-embed-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+
+.vc-keywordnotify-message-embed-field {
+    min-width: 0;
+}
+
+.vc-keywordnotify-message-embed-field[data-inline="false"] {
+    grid-column: 1 / -1;
+}
+
+.vc-keywordnotify-message-embed-field-name {
+    margin-bottom: 2px;
+    color: var(--header-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.vc-keywordnotify-message-embed-field-value {
+    color: var(--text-normal);
+    font-size: 13px;
+}
+
+.vc-keywordnotify-message-embed-media,
+.vc-keywordnotify-message-attachment {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.vc-keywordnotify-message-media {
+    display: block;
+    width: 100%;
+    max-height: 180px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--background-secondary);
+    cursor: pointer;
+}
+
+.vc-keywordnotify-message-media[data-kind="thumbnail"] {
+    width: 96px;
+    height: 96px;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+
+.vc-keywordnotify-message-media:hover {
+    border-color: var(--border-strong);
+}
+
+.vc-keywordnotify-message-media:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+.vc-keywordnotify-message-media-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 180px;
+    object-fit: contain;
+}
+
+.vc-keywordnotify-message-media[data-kind="thumbnail"] .vc-keywordnotify-message-media-image {
+    height: 100%;
+    object-fit: cover;
+}
+
+.vc-keywordnotify-message-embed-footer {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+.vc-keywordnotify-message-embed-footer-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.vc-keywordnotify-message-embed-footer span,
+.vc-keywordnotify-message-embed-footer time {
+    min-width: 0;
+}
+
+@media (max-height: 560px) {
+    .vc-keywordnotify-message {
+        gap: 6px;
+        margin-top: 8px;
     }
 
-    .vc-keywordnotify-x-media,
-    .vc-keywordnotify-x-media img {
+    .vc-keywordnotify-message-embed {
+        gap: 6px;
+        padding: 8px;
+    }
+
+    .vc-keywordnotify-message-media,
+    .vc-keywordnotify-message-media-image {
         max-height: 120px;
-    }
-
-    .vc-keywordnotify-x-quote {
-        padding: 4px 6px;
-    }
-    .vc-keywordnotify-x-text[data-collapsed="true"],
-    .vc-keywordnotify-x-quote-text[data-collapsed="true"] {
-        -webkit-line-clamp: 2;
     }
 }

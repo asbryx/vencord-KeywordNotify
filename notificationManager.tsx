@@ -7,12 +7,13 @@ import { createRoot, MessageActions, NavigationRouter, useEffect, useRef, useSta
 import type { Root } from "react-dom/client";
 
 import { playCustomAudio } from "./audio";
-import { formatNotificationText, type NotificationMentions, splitNotificationText } from "./content";
 import type * as NativeHandlers from "./native";
-import { createNotificationImageUpdater, mergeKeywordHistory, sanitizeKeywordHistory, updateNotificationImage } from "./state";
+import type { MessageSnapshot, MessageSnapshotMediaUpdate } from "./messageSnapshot";
+import { formatMessageSnapshotText } from "./messageSnapshot";
+import { MessageSnapshotView } from "./messageView";
+import { handleNotificationCardAction } from "./notificationInteractions";
+import { createNotificationSnapshotUpdater, mergeKeywordHistory, sanitizeKeywordHistory, updateNotificationSnapshot } from "./state";
 import { enforceNotificationCapacity, NativeNotificationTracker, NotificationHistoryPersistence, SerialTaskQueue } from "./notificationState";
-import { XPreview } from "./xPreviewView";
-import type { XPreview as XPreviewData } from "./xPreview";
 
 
 const Native = VencordNative.pluginHelpers.KeywordNotify as PluginNative<typeof NativeHandlers>;
@@ -34,12 +35,7 @@ export interface KeywordNotificationData {
     authorColor?: string;
     senderType: "bot" | "user";
     location: string;
-    body: string;
-    discordContext?: string;
-    mentions?: NotificationMentions;
-    imageUrl?: string;
-    imageTargetUrl?: string;
-    xPreview?: XPreviewData;
+    snapshot: MessageSnapshot;
 
     timestamp: number;
 }
@@ -130,8 +126,6 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
     const remainingRef = useRef(notification.durationMs);
     const [hovered, setHovered] = useState(false);
     const [focused, setFocused] = useState(false);
-    const [imageFailed, setImageFailed] = useState(false);
-    useEffect(() => setImageFailed(false), [notification.imageUrl]);
 
     const pinned = notification.pinSource != null;
     useEffect(() => {
@@ -158,11 +152,6 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
     }, [notification.id, pinned, hovered, focused, notification.durationMs]);
 
     const progress = notification.durationMs === 0 ? 100 : remainingMs / notification.durationMs * 100;
-    const bodySegments = notification.xPreview ? undefined : splitNotificationText(notification.body, notification.mentions);
-    const contextSegments = notification.discordContext ? splitNotificationText(notification.discordContext, notification.mentions) : undefined;
-    const image = notification.imageUrl
-        ? { previewUrl: notification.imageUrl, targetUrl: notification.imageTargetUrl ?? notification.imageUrl }
-        : undefined;
     const deliveredAt = new Date(notification.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     return (
@@ -170,17 +159,16 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
             className="vc-keywordnotify-card"
             data-notification-id={notification.id}
             data-pinned={pinned}
-            data-x-preview={notification.xPreview != null}
             tabIndex={0}
             aria-label={`Open Discord message from ${notification.authorName}`}
-            onClick={() => {
-                navigateToKeywordMessage(notification);
-                removeNotification(notification.id);
-            }}
-            onContextMenu={event => {
-                event.preventDefault();
-                removeNotification(notification.id);
-            }}
+            onClick={() => handleNotificationCardAction("open", {
+                navigate: () => navigateToKeywordMessage(notification),
+                remove: () => removeNotification(notification.id)
+            })}
+            onContextMenu={event => handleNotificationCardAction("dismiss", {
+                navigate: () => navigateToKeywordMessage(notification),
+                remove: () => removeNotification(notification.id)
+            }, event)}
             onKeyDown={event => {
                 if (event.target !== event.currentTarget || event.key !== "Enter") return;
                 event.preventDefault();
@@ -232,55 +220,11 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
                     </Button>
                 </div>
             </header>
-            {notification.xPreview ? <>
-                {contextSegments && (
-                    <p className="vc-keywordnotify-discord-context">{contextSegments.map((segment, index) => segment.type === "link" ? (
-                        <a
-                            key={index}
-                            href={segment.value}
-                            onClick={event => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                VencordNative.native.openExternal(segment.value);
-                            }}>
-                            {segment.label ?? segment.value}
-                        </a>
-                    ) : segment.type === "mention" ? (
-                        <span key={index} className="vc-keywordnotify-mention" data-mention-kind={segment.kind}>{segment.value}</span>
-                    ) : segment.value)}</p>
-                )}
-                <XPreview preview={notification.xPreview} image={image} />
-            </> : <>
-                <div className="vc-keywordnotify-card-body">
-                    {bodySegments!.map((segment, index) => segment.type === "link" ? (
-                        <a
-                            key={index}
-                            href={segment.value}
-                            onClick={event => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                VencordNative.native.openExternal(segment.value);
-                            }}>
-                            {segment.label ?? segment.value}
-                        </a>
-                    ) : segment.type === "mention" ? (
-                        <span key={index} className="vc-keywordnotify-mention" data-mention-kind={segment.kind}>{segment.value}</span>
-                    ) : segment.value)}
-                </div>
-                {notification.imageUrl && !imageFailed && (
-                    <img
-                        className="vc-keywordnotify-image"
-                        src={notification.imageUrl}
-                        alt="Message attachment"
-                        onError={() => setImageFailed(true)}
-                        onClick={event => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            VencordNative.native.openExternal(notification.imageTargetUrl ?? notification.imageUrl!);
-                        }}
-                    />
-                )}
-            </>}
+            <MessageSnapshotView
+                snapshot={notification.snapshot}
+                channelId={notification.channelId}
+                messageId={notification.messageId}
+            />
             {!pinned && notification.durationMs !== 0 && (
                 <div className="vc-keywordnotify-progress" style={{ width: `${progress}%` }} />
             )}
@@ -321,7 +265,7 @@ export async function showNativeKeywordNotification(data: KeywordNotificationDat
     if (!managerRunning || generation !== deliveryGeneration || permission !== "granted" || document.hasFocus()) return;
 
     const nativeNotification = new Notification(`${data.authorName} · ${data.location}`, {
-        body: data.xPreview?.text ?? (data.xPreview ? `X post by ${data.xPreview.authorName}` : formatNotificationText(data.body, data.mentions)),
+        body: formatMessageSnapshotText(data.snapshot),
         icon: data.avatarUrl,
         silent: true
     });
@@ -391,27 +335,23 @@ export function deliverKeywordNotification(data: KeywordNotificationData, option
         .catch(error => logger.error("Failed to show native keyword notification", error));
 }
 
-export function enrichKeywordNotificationImage(
-    messageId: string,
-    update: { generic?: { previewUrl: string; targetUrl: string; }; xPreview?: { url: string; image: { previewUrl: string; targetUrl: string; }; }; }
-) {
-    if (!managerRunning || (!update.generic && !update.xPreview)) return;
+export function enrichKeywordNotificationSnapshot(update: MessageSnapshotMediaUpdate) {
+    if (!managerRunning) return;
     const generation = deliveryGeneration;
-    const updatedNotifications = updateNotificationImage(activeNotifications, messageId, update);
+    const updatedNotifications = updateNotificationSnapshot(activeNotifications, update);
     if (updatedNotifications !== activeNotifications) {
         activeNotifications = updatedNotifications;
         renderNotifications();
     }
 
-    const historyUpdate = historyPersistence.enqueueUpdate(messageId, historyQueue, async () => {
+    const historyUpdate = historyPersistence.enqueueUpdate(update.messageId, historyQueue, async () => {
         if (!managerRunning || generation !== deliveryGeneration) return;
         await DataStore.update<unknown>(KEYWORD_HISTORY_KEY, oldValue => {
             if (!Array.isArray(oldValue)) return oldValue;
-            return createNotificationImageUpdater(
-                messageId,
+            return createNotificationSnapshotUpdater(
                 update,
                 () => managerRunning && generation === deliveryGeneration
-            )(oldValue);
+            )(oldValue as KeywordNotificationData[]);
         });
     });
     void historyUpdate?.catch(error => logger.error("Failed to enrich notification history", error));
