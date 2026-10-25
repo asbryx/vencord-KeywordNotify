@@ -1,3 +1,5 @@
+import { evaluatePatternAgainstTexts, regexWorkerGuard, type RegexWorkerGuard } from "./regexGuard";
+
 export enum ListType {
     BlackList = "BlackList",
     Whitelist = "Whitelist"
@@ -43,126 +45,6 @@ export interface KeywordMessage {
     embeds?: KeywordEmbed[] | null;
 }
 
-const urlCandidatePattern = /https?:\/\/[^\s<>"'`]+/gi;
-const trailingUrlPunctuationPattern = /[),.!?;:\]]+$/;
-const animatedProviderDomains = ["klipy.com", "giphy.com", "tenor.com"];
-
-interface TextRange {
-    start: number;
-    end: number;
-}
-
-function isAnimatedProviderUrl(url: string) {
-    try {
-        const hostname = new URL(url).hostname.toLowerCase();
-        return animatedProviderDomains.some(domain => hostname === domain || hostname.endsWith(`.${domain}`));
-    } catch {
-        return false;
-    }
-}
-
-function getAnimatedProviderUrlRanges(text: string) {
-    const ranges: TextRange[] = [];
-    for (const match of text.matchAll(urlCandidatePattern)) {
-        const candidate = match[0];
-        const trailingPunctuation = candidate.match(trailingUrlPunctuationPattern)?.[0] ?? "";
-        const url = trailingPunctuation ? candidate.slice(0, -trailingPunctuation.length) : candidate;
-        if (!isAnimatedProviderUrl(url)) continue;
-
-        const start = match.index;
-        ranges.push({ start, end: start + url.length });
-    }
-    return ranges;
-}
-
-function maskTextRanges(text: string, ranges: TextRange[]) {
-    let result = "";
-    let cursor = 0;
-
-    for (const range of ranges) {
-        result += text.slice(cursor, range.start);
-        result += " ".repeat(range.end - range.start);
-        cursor = range.end;
-    }
-    return result + text.slice(cursor);
-}
-
-function hasMeaningfulTextOutsideRanges(text: string, start: number, end: number, ranges: TextRange[]) {
-    let cursor = start;
-    let intersectsBlockedRange = false;
-    let remainder = "";
-
-    for (const range of ranges) {
-        const overlapStart = Math.max(start, range.start);
-        const overlapEnd = Math.min(end, range.end);
-        if (overlapStart >= overlapEnd) continue;
-
-        intersectsBlockedRange = true;
-        if (cursor < overlapStart) remainder += text.slice(cursor, overlapStart);
-        cursor = Math.max(cursor, overlapEnd);
-    }
-
-    if (!intersectsBlockedRange) return true;
-    if (cursor < end) remainder += text.slice(cursor, end);
-    return /[\p{L}\p{N}\p{S}]/u.test(remainder);
-}
-
-function matches(text: string | null | undefined, regex: RegExp) {
-    if (typeof text !== "string") return false;
-
-    const blockedRanges = getAnimatedProviderUrlRanges(text);
-    if (blockedRanges.length === 0) return regex.test(text);
-
-    const searchRegex = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : `${regex.flags}g`);
-    let neutralizedText: string | undefined;
-    let match: RegExpExecArray | null;
-    while ((match = searchRegex.exec(text)) != null) {
-        const start = match.index;
-        if (match[0].length === 0) {
-            neutralizedText ??= maskTextRanges(text, blockedRanges);
-            const neutralRegex = new RegExp(regex.source, regex.flags.replace(/[gy]/g, ""));
-            if (neutralRegex.test(neutralizedText)) return true;
-            searchRegex.lastIndex++;
-            continue;
-        }
-        if (hasMeaningfulTextOutsideRanges(text, start, start + match[0].length, blockedRanges)) return true;
-    }
-    return false;
-}
-
-function entryMatchesMessage(message: KeywordMessage, entry: KeywordEntry) {
-    let regex: RegExp;
-    try {
-        regex = new RegExp(entry.regex, entry.ignoreCase ? "i" : "");
-    } catch {
-        return false;
-    }
-
-    if (matches(message.content, regex)) return true;
-
-    for (const embed of message.embeds ?? []) {
-        if (
-            matches(embed.author?.name, regex)
-            || matches(embed.title, regex)
-            || matches(embed.description, regex)
-            || matches(embed.rawTitle, regex)
-            || matches(embed.rawDescription, regex)
-            || matches(embed.footer?.text, regex)
-        ) return true;
-
-        for (const field of embed.fields ?? []) {
-            if (
-                matches(field.name, regex)
-                || matches(field.value, regex)
-                || matches(field.rawName, regex)
-                || matches(field.rawValue, regex)
-            ) return true;
-        }
-    }
-
-    return false;
-}
-
 const customEmojiPattern = /<a?:[^:>]+:\d+>\s*/g;
 const inlineCodePattern = /`([^`]+)`/g;
 
@@ -202,6 +84,53 @@ export interface KeywordMatch {
     entryIndex: number;
 }
 
+function collectMessageTexts(message: KeywordMessage): string[] {
+    const texts: string[] = [];
+    if (typeof message.content === "string") texts.push(message.content);
+
+    for (const embed of message.embeds ?? []) {
+        const candidates = [
+            embed.author?.name,
+            embed.title,
+            embed.description,
+            embed.rawTitle,
+            embed.rawDescription,
+            embed.footer?.text
+        ];
+        for (const field of embed.fields ?? []) {
+            candidates.push(field.name, field.value, field.rawName, field.rawValue);
+        }
+        for (const candidate of candidates) {
+            if (typeof candidate === "string" && candidate.length > 0) texts.push(candidate);
+        }
+    }
+
+    return texts;
+}
+
+export function entryAllowsMessage(
+    message: KeywordMessage,
+    entry: KeywordEntry,
+    guildId: string | undefined,
+    ignoreBots: boolean
+) {
+    if (!entry.regex) return false;
+
+    const listIds = Array.isArray(entry.listIds) ? entry.listIds : [];
+    const listed = listIds.includes(message.channel_id)
+        || listIds.includes(message.author.id)
+        || (guildId != null && listIds.includes(guildId));
+    const whitelistMode = entry.listType === ListType.Whitelist;
+
+    if ((!whitelistMode && listed) || (whitelistMode && !listed)) return false;
+    if (ignoreBots && message.author.bot && (!whitelistMode || !listIds.includes(message.author.id))) return false;
+    return true;
+}
+
+function entryMatchesMessage(message: KeywordMessage, entry: KeywordEntry) {
+    return evaluatePatternAgainstTexts(entry.regex, entry.ignoreCase ? "i" : "", collectMessageTexts(message)).matched;
+}
+
 export function findKeywordMatch(
     message: KeywordMessage,
     entries: readonly KeywordEntry[],
@@ -209,19 +138,36 @@ export function findKeywordMatch(
     ignoreBots: boolean
 ): KeywordMatch | null {
     for (const [entryIndex, entry] of entries.entries()) {
-        if (!entry.regex) continue;
-
-        const listIds = Array.isArray(entry.listIds) ? entry.listIds : [];
-        const listed = listIds.includes(message.channel_id)
-            || listIds.includes(message.author.id)
-            || (guildId != null && listIds.includes(guildId));
-        const whitelistMode = entry.listType === ListType.Whitelist;
-
-        if ((!whitelistMode && listed) || (whitelistMode && !listed)) continue;
-        if (ignoreBots && message.author.bot && (!whitelistMode || !listIds.includes(message.author.id))) continue;
+        if (!entryAllowsMessage(message, entry, guildId, ignoreBots)) continue;
         if (entryMatchesMessage(message, entry)) return { pattern: entry.regex, entryIndex };
     }
 
+    return null;
+}
+
+export async function findKeywordMatchAsync(
+    message: KeywordMessage,
+    entries: readonly KeywordEntry[],
+    guildId: string | undefined,
+    ignoreBots: boolean,
+    guard: RegexWorkerGuard = regexWorkerGuard
+): Promise<KeywordMatch | null> {
+    const candidates: { entry: KeywordEntry; entryIndex: number; }[] = [];
+    for (const [entryIndex, entry] of entries.entries()) {
+        if (entryAllowsMessage(message, entry, guildId, ignoreBots)) candidates.push({ entry, entryIndex });
+    }
+    if (candidates.length === 0) return null;
+
+    const texts = collectMessageTexts(message);
+    const results = await guard.run(candidates.map(candidate => ({
+        pattern: candidate.entry.regex,
+        flags: candidate.entry.ignoreCase ? "i" : "",
+        texts
+    })));
+
+    for (let index = 0; index < candidates.length; index++) {
+        if (results[index]?.matched) return { pattern: candidates[index].entry.regex, entryIndex: candidates[index].entryIndex };
+    }
     return null;
 }
 

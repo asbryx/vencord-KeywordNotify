@@ -24,12 +24,13 @@ import { ChannelStore, GuildMemberStore, GuildStore, Select, TextInput, UserStor
 
 import { clearCustomAudio, loadCustomAudio, reconcileAudioFileName, replaceMentionNotificationSound, selectCustomAudio, stopCustomAudio, type CustomAudioKind } from "./audio";
 import { KeywordHistoryButton } from "./history";
-import { findKeywordMatch, KeywordEntry, ListType } from "./matcher";
+import { findKeywordMatchAsync, KeywordEntry, ListType } from "./matcher";
 import { createMessageSnapshot, createMessageSnapshotMediaUpdate } from "./messageSnapshot";
 import { isSpecificMention } from "./mentions";
 import { deliverKeywordNotification, enrichKeywordNotificationSnapshot, startKeywordNotificationManager, stopKeywordNotificationManager } from "./notificationManager";
 
 import { resolveLoadedKeywordEntries } from "./state";
+import { inspectPattern, regexWorkerGuard } from "./regexGuard";
 
 let keywordEntries: KeywordEntry[] = [];
 let audioLifecycleToken = 0;
@@ -190,6 +191,14 @@ function KeywordEntries() {
                             <DeleteIcon />
                         </Button>
                     </Flex>
+                    {inspectPattern(values[index].regex, values[index].ignoreCase ? "i" : "").map((issue, issueIndex) => (
+                        <div
+                            key={issueIndex}
+                            className={`vc-keywordnotify-pattern-${issue.level}`}
+                            role={issue.level === "error" ? "alert" : undefined}>
+                            {issue.message}
+                        </div>
+                    ))}
                     <FormSwitch
                         title="Ignore Case"
                         value={values[index].ignoreCase}
@@ -405,6 +414,7 @@ export default definePlugin({
         ++audioLifecycleToken;
         stopCustomAudio();
         stopKeywordNotificationManager();
+        regexWorkerGuard.dispose();
     },
 
     flux: {
@@ -414,46 +424,49 @@ export default definePlugin({
             const currentUser = UserStore.getCurrentUser();
             if (!currentUser || message.author.id === currentUser.id) return;
 
-            try {
-                const channel = ChannelStore.getChannel(message.channel_id);
-                const guildId = channel?.guild_id;
-                if (!findKeywordMatch(message, keywordEntries, guildId, settings.store.ignoreBots)) return;
-
-                let avatarUrl: string | undefined;
+            void (async () => {
                 try {
-                    avatarUrl = message.author.getAvatarURL?.(guildId, 128, false);
-                } catch { }
+                    const channel = ChannelStore.getChannel(message.channel_id);
+                    const guildId = channel?.guild_id;
+                    const match = await findKeywordMatchAsync(message, keywordEntries, guildId, settings.store.ignoreBots);
+                    if (!match) return;
 
-                const guild = guildId ? GuildStore.getGuild(guildId) : undefined;
-                const member = guildId ? GuildMemberStore.getMember(guildId, message.author.id) : null;
-                const channelName = channel?.name ? `#${channel.name}` : "Direct Message";
-                const location = guild ? `${guild.name} · ${channelName}` : channelName;
-                const snapshot = createMessageSnapshot(message);
+                    let avatarUrl: string | undefined;
+                    try {
+                        avatarUrl = message.author.getAvatarURL?.(guildId, 128, false);
+                    } catch { }
+
+                    const guild = guildId ? GuildStore.getGuild(guildId) : undefined;
+                    const member = guildId ? GuildMemberStore.getMember(guildId, message.author.id) : null;
+                    const channelName = channel?.name ? `#${channel.name}` : "Direct Message";
+                    const location = guild ? `${guild.name} · ${channelName}` : channelName;
+                    const snapshot = createMessageSnapshot(message);
 
 
-                deliverKeywordNotification({
-                    id: `keyword-${message.id}`,
-                    channelId: message.channel_id,
-                    guildId,
-                    messageId: message.id,
-                    authorName: member?.nick || message.author.globalName || message.author.username,
-                    authorColor: member?.colorString || message.colorString || undefined,
-                    senderType: message.author.bot ? "bot" : "user",
-                    avatarUrl,
-                    location,
-                    snapshot,
+                    deliverKeywordNotification({
+                        id: `keyword-${message.id}`,
+                        channelId: message.channel_id,
+                        guildId,
+                        messageId: message.id,
+                        authorName: member?.nick || message.author.globalName || message.author.username,
+                        authorColor: member?.colorString || message.colorString || undefined,
+                        senderType: message.author.bot ? "bot" : "user",
+                        avatarUrl,
+                        location,
+                        snapshot,
 
-                    timestamp: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now()
-                }, {
-                    durationMs: settings.store.durationSeconds * 1000,
-                    historyLimit: settings.store.historyLimit,
-                    pinWhenUnfocused: settings.store.pinWhenUnfocused,
-                    soundEnabled: settings.store.soundEnabled,
-                    soundVolume: settings.store.soundVolume
-                });
-            } catch (error) {
-                logger.error("Failed to process message", error);
-            }
+                        timestamp: message.timestamp instanceof Date ? message.timestamp.getTime() : Date.now()
+                    }, {
+                        durationMs: settings.store.durationSeconds * 1000,
+                        historyLimit: settings.store.historyLimit,
+                        pinWhenUnfocused: settings.store.pinWhenUnfocused,
+                        soundEnabled: settings.store.soundEnabled,
+                        soundVolume: settings.store.soundVolume
+                    });
+                } catch (error) {
+                    logger.error("Failed to process message", error);
+                }
+            })();
         },
 
         MESSAGE_UPDATE({ message }: { message?: unknown; }) {

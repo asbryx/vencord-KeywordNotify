@@ -539,3 +539,24 @@ a.vc-keywordnotify-message-embed-title:hover {
         max-height: 120px;
     }
 }
+
+.vc-keywordnotify-pattern-error,
+.vc-keywordnotify-pattern-warning {
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.vc-keywordnotify-pattern-error {
+    border: 1px solid var(--status-danger);
+    color: var(--text-danger);
+    background: color-mix(in srgb, var(--status-danger) 12%, transparent);
+}
+
+.vc-keywordnotify-pattern-warning {
+    border: 1px solid var(--status-warning);
+    color: var(--text-warning);
+    background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+}

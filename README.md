@@ -13,6 +13,8 @@ This repository is a maintained fork of [camila314/vencord-KeywordNotify](https:
 - Preserve Discord message content, structured embeds, fields, media, and attachments in live cards and History.
 - Open the original Discord message from a live card or History entry.
 - Dismiss every live card at once with `Ctrl+Shift+X` or a double `Escape` press.
+- Validate patterns while editing: invalid expressions and nested-quantifier patterns are flagged in the settings UI.
+- Evaluate patterns inside a Web Worker with a 200 ms cap, so a pathological pattern cannot freeze Discord.
 - Pin cards manually or automatically while Discord is unfocused.
 - Keep a configurable local notification History.
 - Play Discord or custom sounds for keyword notifications.
@@ -150,7 +152,7 @@ Run the Vencord TypeScript check:
 pnpm testTsc
 ```
 
-The current version passed 95 focused tests, the Vencord TypeScript check, and the production build.
+The current version passed 109 focused tests, the Vencord TypeScript check, and the production build.
 
 ## Releases
 
