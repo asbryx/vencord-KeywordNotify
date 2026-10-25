@@ -92,3 +92,17 @@ test("guard returns an empty result for no jobs", async () => {
     assert.deepEqual(await guard.run([]), []);
     guard.dispose();
 });
+
+test("guard returns one result per job so callers can index safely", async () => {
+    const guard = new RegexWorkerGuard();
+    const jobs = [
+        { pattern: "a", flags: "", texts: ["a"] },
+        { pattern: "b", flags: "", texts: ["a"] },
+        { pattern: "c", flags: "", texts: ["a"] }
+    ];
+    const results = await guard.run(jobs);
+    guard.dispose();
+
+    assert.equal(results.length, jobs.length);
+    assert.deepEqual(results.map(result => result.matched), [true, false, false]);
+});

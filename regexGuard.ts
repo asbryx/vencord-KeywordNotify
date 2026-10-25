@@ -234,7 +234,7 @@ export class RegexWorkerGuard {
             }
         });
 
-        if (outcome) return outcome;
+        if (Array.isArray(outcome) && outcome.length === jobs.length) return outcome;
         return jobs.map(() => ({ matched: false, timedOut: true }));
     }
 }
