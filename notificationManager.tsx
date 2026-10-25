@@ -7,6 +7,7 @@ import { createRoot, MessageActions, NavigationRouter, useEffect, useRef, useSta
 import type { Root } from "react-dom/client";
 
 import { playCustomAudio } from "./audio";
+import { resolveClearAllShortcut } from "./clearAllShortcut";
 import type * as NativeHandlers from "./native";
 import type { MessageSnapshot, MessageSnapshotMediaUpdate } from "./messageSnapshot";
 import { formatMessageSnapshotText } from "./messageSnapshot";
@@ -58,6 +59,8 @@ let activeNotifications: ActiveNotification[] = [];
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 let listeningForFocus = false;
+let listeningForShortcuts = false;
+let lastEscapeAt = 0;
 let deliveryGeneration = 0;
 let managerRunning = true;
 const nativeNotifications = new NativeNotificationTracker<Notification>();
@@ -98,6 +101,24 @@ function renderNotifications() {
 function removeNotification(id: string) {
     activeNotifications = activeNotifications.filter(notification => notification.id !== id);
     renderNotifications();
+}
+
+export function clearAllKeywordNotifications() {
+    const cleared = activeNotifications.length;
+    if (cleared === 0) return 0;
+
+    activeNotifications = [];
+    lastEscapeAt = 0;
+    renderNotifications();
+    return cleared;
+}
+
+function handleClearAllShortcut(event: KeyboardEvent) {
+    const result = resolveClearAllShortcut(event, lastEscapeAt, Date.now());
+    lastEscapeAt = result.lastEscapeAt;
+    if (result.action !== "clear") return;
+    if (clearAllKeywordNotifications() === 0) return;
+    event.preventDefault();
 }
 
 function setPinned(id: string, pinned: boolean) {
@@ -239,6 +260,10 @@ function KeywordNotificationCard({ notification }: { notification: ActiveNotific
 
 export function startKeywordNotificationManager(historyLimit: number) {
     managerRunning = true;
+    if (!listeningForShortcuts) {
+        window.addEventListener("keydown", handleClearAllShortcut, true);
+        listeningForShortcuts = true;
+    }
     const generation = deliveryGeneration;
     let sanitizedHistory: unknown;
     void historyQueue.enqueue(async () => {
@@ -372,6 +397,11 @@ export function stopKeywordNotificationManager() {
         window.removeEventListener("focus", handleWindowFocus);
         listeningForFocus = false;
     }
+    if (listeningForShortcuts) {
+        window.removeEventListener("keydown", handleClearAllShortcut, true);
+        listeningForShortcuts = false;
+    }
+    lastEscapeAt = 0;
     root?.unmount();
     container?.remove();
     root = undefined;

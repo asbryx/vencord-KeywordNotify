@@ -12,6 +12,7 @@ This repository is a maintained fork of [camila314/vencord-KeywordNotify](https:
 - Show clickable cards with author, server, channel, message text, mentions, media, and delivery time.
 - Preserve Discord message content, structured embeds, fields, media, and attachments in live cards and History.
 - Open the original Discord message from a live card or History entry.
+- Dismiss every live card at once with `Ctrl+Shift+X` or a double `Escape` press.
 - Pin cards manually or automatically while Discord is unfocused.
 - Keep a configurable local notification History.
 - Play Discord or custom sounds for keyword notifications.
@@ -109,6 +110,8 @@ Custom sound files are copied into Vencord's local plugin data directory. Replac
 - Use the pin button to keep or release the card.
 - Use the close button to dismiss the card.
 - Hovering or focusing a timed card pauses its countdown.
+- Press `Ctrl+Shift+X` anywhere in Discord to dismiss every live card, including pinned ones.
+- Press `Escape` twice within 400 ms to do the same. A single `Escape` is left untouched, and `Escape` never clears cards while the message box or another text field has focus.
 - Links and media inside a card open their own targets without triggering card navigation.
 
 ### History
@@ -147,7 +150,7 @@ Run the Vencord TypeScript check:
 pnpm testTsc
 ```
 
-The current version passed 85 focused tests, the Vencord TypeScript check, and the production build.
+The current version passed 95 focused tests, the Vencord TypeScript check, and the production build.
 
 ## Releases
 
